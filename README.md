@@ -18,14 +18,14 @@ Notes from a private reverse-engineering pass on BattleBit's Unity IL2CPP `GameA
 2. [What this is](#what-this-is)
 3. [Method](#method)
 4. [Coverage](#coverage)
-5. [Findings](#findings)
-6. [Combat pipeline](#combat-pipeline)
-7. [Gamemode lifecycle](#gamemode-lifecycle)
-8. [Spawn / authority](#spawn--authority)
-9. [Networking sketch](#networking-sketch)
-10. [Vehicles / loadout / squad](#vehicles--loadout--squad)
-11. [Key addresses](#key-addresses)
-12. [Evidence grades](#evidence-grades)
+5. [Evidence grades](#evidence-grades)
+6. [Findings](#findings)
+7. [Combat pipeline](#combat-pipeline)
+8. [Gamemode lifecycle](#gamemode-lifecycle)
+9. [Spawn / authority](#spawn--authority)
+10. [Networking sketch](#networking-sketch)
+11. [Vehicles / loadout / squad](#vehicles--loadout--squad)
+12. [Key addresses](#key-addresses)
 13. [Still unknown](#still-unknown)
 14. [License](#license)
 
@@ -76,19 +76,29 @@ Skipped by design: Unity/System framework (~84k methods) and AC-tagged methods (
 
 Many Il2Cpp names alias one RVA; unique addresses are about 113k versus ~289k ScriptMethod entries.
 
+## Evidence grades
+
+| Grade | Meaning |
+|-------|---------|
+| O | Observed directly in private decompile / metadata |
+| I | Inferred from structure / naming / call patterns |
+| U | Unknown / not established |
+
+Claims below are tagged with these grades.
+
 ## Findings
 
-1. Server-authoritative monolith: spawn, damage policy, and many mode transitions are decided server-side. Clients get thinner `Received*` paths.
-2. The thin `ServerSide_ApplyDamage` helper only subtracts a float. Routing sits in a large orchestrator plus a target-resolution callee with a per-kind switch.
-3. HP math and kill reporting are separate. Kill enqueue builds a record and appends to a list; it does not set HP to 0.
-4. Modes often share a small timer: `endTime = duration + Time.time`. Special modes such as OneLife also iterate players.
-5. Spawn is a large policy function. Failures send numeric deny reason codes as network messages.
-6. Networking uses clear `Send*` / `Received*` / `*_serverSide` naming and shared send helpers. Full opcodes are still unknown.
+1. **[O/I]** Server-authoritative monolith: spawn, damage policy, and many mode transitions are decided server-side. Clients get thinner `Received*` paths.
+2. **[O]** The thin `ServerSide_ApplyDamage` helper only subtracts a float. Routing sits in a large orchestrator plus a target-resolution callee with a per-kind switch.
+3. **[O]** HP math and kill reporting are separate. Kill enqueue builds a record and appends to a list; it does not set HP to 0.
+4. **[O]** Modes often share a small timer: `endTime = duration + Time.time`. Special modes such as OneLife also iterate players.
+5. **[O]** Spawn is a large policy function. Failures send numeric deny reason codes as network messages.
+6. **[O/U]** Networking uses clear `Send*` / `Received*` / `*_serverSide` naming and shared send helpers. Full opcodes are still unknown **[U]**.
 7. The mass decompile was raw material. The sections below are the distilled reading of it.
 
 ## Combat pipeline
 
-### Flow
+### Flow **[O]**
 
 ```
 damage context
@@ -104,23 +114,23 @@ parallel: ExecuteDamage (FUN_181aaf4a0) → FUN_181c42500 (hitbox health)
 kills: EnqueueKill* → FUN_182ff9c90 (growable list push)
 ```
 
-### Step detail (observed)
+### Step detail **[O]**
 
 1. `FUN_180e81940` copies context locals, runs early validation and prep helpers (`FUN_181e02e90` / `FUN_1822d7d20`), then calls the target resolver.
 2. `FUN_181dfa5e0` builds and iterates a hit target set (loop helper `FUN_1819686c0`), then `switch(targetKind)` with IL2CPP type checks. Infantry-like cases gate through helpers (`FUN_180fb1d90`, `FUN_182455950`, `FUN_182d770f0`), optionally thin HP apply, and vehicle-style apply.
 3. Thin player apply `FUN_1817984e0` does `hp = max(0, hp - dmg)` at `this+0x30` only. It is not the combat brain.
 4. Hitbox path: `ExecuteDamage` indexes a hitbox slot from `param_2`, then `FUN_181c42500(hitbox, health - damage, 0)`.
-5. Vehicles: the orchestrator also reaches `FUN_180fae540`. Post-damage `FUN_180faf380` (~19KB) writes health (`+0x1e4`) and walks component lists for sync.
+5. Vehicles: the orchestrator also reaches `FUN_180fae540`. Post-damage `FUN_180faf380` (~19KB) writes health (`+0x1e4`) and walks component lists for sync **[O/I]**.
 6. Kill queue: `EnqueueKill` / `EnqueueAssistKill` / `EnqueueVehicleKill` allocate a record, fill attacker/victim/flags, push via `FUN_182ff9c90`, and bump a sequence counter (`+0x80`). That is bookkeeping, not HP math.
 7. Noise: `FUN_1800af160` / `FUN_1800af130` are null/throw aborts everywhere. Ignore them as gameplay.
 
-### Phase 4 combat map (T1 bucket, full 180/180)
+### Phase 4 combat map (T1 bucket, full 180/180) **[O]**
 
 Hottest shared callees by frequency: `FUN_1800af160`, `FUN_1800af130`, `FUN_1808bb370`, `FUN_181710760`, `FUN_1822bb450`, `FUN_182e7cdb0`, `FUN_181c597d0`, `FUN_18101de30`, …
 
 Largest T1 `Apply*` bodies are often settings helpers (`ApplyToSettings_*`, tens–100KB+), not the damage orchestrator (naming collision). Other large combat-sized surfaces include `EnterDeathMode`, `ExplosionSphere`, `KillAndSendToPool`, and `OnAPlayerKilledAnotherPlayer`.
 
-### Open (combat)
+### Open (combat) **[U]**
 
 - Exact `switch` case labels (infantry vs vehicle vs prop / seat)
 - Where `EnqueueKill` sits relative to HP reaching 0 (callers not fully traced)
@@ -129,7 +139,7 @@ Largest T1 `Apply*` bodies are often settings helpers (`ApplyToSettings_*`, tens
 
 ## Gamemode lifecycle
 
-### Shared timer (observed)
+### Shared timer **[O]**
 
 ```
 FUN_182efaad0:
@@ -140,7 +150,7 @@ FUN_182efaad0:
 
 Most simple modes' server start eventually call this (for example a nested timer at `mode+0x58` in OneLife).
 
-### OneLife server start (observed)
+### OneLife server start **[O]**
 
 ```
 OnStartGameModeServerSide_OneLife (FUN_1810ae5c0)
@@ -151,7 +161,7 @@ OnStartGameModeServerSide_OneLife (FUN_1810ae5c0)
 
 OneLife starts the timer and iterates actors. It is more than a timer wrapper.
 
-### Mode taxonomy (inferred)
+### Mode taxonomy **[I]**
 
 | Class | Start body shape |
 |-------|------------------|
@@ -161,9 +171,9 @@ OneLife starts the timer and iterates actors. It is more than a timer wrapper.
 | GunGame FFA/Team | Distinct server start RVAs; small specialized bodies |
 | Infected / VoxelFortify / TDM | Own `OnStart*` RVAs; client sides often stubs |
 
-Round end: send/handle symbols exist (`SendEndOfRoundMessage`, match-lifecycle callbacks). The exact win-condition → end-of-round call graph was not fully walked.
+Round end: send/handle symbols exist (`SendEndOfRoundMessage`, match-lifecycle callbacks) **[O]**. The exact win-condition → end-of-round call graph was not fully walked **[U]**.
 
-### Open (modes)
+### Open (modes) **[U]**
 
 - Who writes `mode+0x10` duration before timer start
 - Per-mode win conditions → end-of-round graph
@@ -171,25 +181,25 @@ Round end: send/handle symbols exist (`SendEndOfRoundMessage`, match-lifecycle c
 
 ## Spawn / authority
 
-### Model
+### Model **[O/I]**
 
 - Server decides whether a spawn proceeds (`OnPlayerSpawn` @ `0x180c3aed0`, ~65KB). This is a policy engine, not a teleport.
-- Failures call `FUN_180ce6090` (SendDenySpawn) with immediate integer reason codes.
-- Clients have a smaller Received path (`0x18111d4e0`, ~5KB) for applying an allowed spawn.
+- Failures call `FUN_180ce6090` (SendDenySpawn) with immediate integer reason codes **[O]**.
+- Clients have a smaller Received path (`0x18111d4e0`, ~5KB) for applying an allowed spawn **[O]**.
 
-### Deny codes observed in `OnPlayerSpawn`
+### Deny codes in `OnPlayerSpawn` **[O]**
 
 | Code (hex) | Approx role |
 |------------|-------------|
 | `0xfa` | Early rejection gate |
 | `0x2f5` | Secondary validation fail |
-| `0x5cc` / `0x5f1` / `0x5fe` | Slot / loadout / state rejects (inferred) |
+| `0x5cc` / `0x5f1` / `0x5fe` | Slot / loadout / state rejects **[I]** |
 | `0x369` / `0x36a` | Paired related denies |
 | `0x54f` | Terminal deny |
 
-Exact string/enum labels need further enum recovery.
+Exact string/enum labels need further enum recovery **[U]**.
 
-### SendDenySpawn body (observed)
+### SendDenySpawn body **[O]**
 
 ```
 FUN_180ce6090(ctx, reasonCode)
@@ -200,7 +210,7 @@ FUN_180ce6090(ctx, reasonCode)
 
 Deny goes out as a network message. It is not a silent local return.
 
-### Open (spawn)
+### Open (spawn) **[U]**
 
 - Deny code → player-facing string / enum map
 - Which branches are rally / friend / vehicle spawn
@@ -208,9 +218,9 @@ Deny goes out as a network message. It is not a silent local return.
 
 ## Networking sketch
 
-Pattern-level only. This is not a full opcode map.
+Pattern-level only. This is not a full opcode map **[U]**.
 
-### Direction from names (observed)
+### Direction from names **[O]**
 
 | Pattern | Role |
 |---------|------|
@@ -219,9 +229,9 @@ Pattern-level only. This is not a full opcode map.
 | `*_serverSide` | Server-authoritative action |
 | `MessageToServer*` / `HandleMessageToClient*` | Bidirectional callbacks |
 
-Phase 4 T1 network bucket: 516 readable methods scanned.
+Phase 4 T1 network bucket: 516 readable methods scanned **[O]**.
 
-### Shared plumbing (observed)
+### Shared plumbing **[O]**
 
 Across Send/Received bodies, the same helpers dominate:
 
@@ -230,19 +240,19 @@ Across Send/Received bodies, the same helpers dominate:
 - `FUN_181710760` — connection/peer resolve (arg often channel/type id)
 - `FUN_1822b9ab0` / `FUN_1822b9ff0` / `FUN_1822bc4e0` / `FUN_1822bece0` — field writers on message objects
 
-Inferred pattern: resolve peer → alloc/fill message → shared send helpers.
+Inferred pattern **[I]**: resolve peer → alloc/fill message → shared send helpers.
 
-### Concrete walked examples
+### Concrete walked examples **[O]**
 
 1. SendDenySpawn: reason → peer → send.
 2. Health notify `FUN_180b36490`: builds a message, writes floats/flags via the `FUN_1822b*` family.
-3. Kill enqueue: local list first; net fan-out is probably elsewhere (callers unknown).
+3. Kill enqueue: local list first; net fan-out is probably elsewhere **[U]**.
 
-### Transport
+### Transport **[O]**
 
 Steam Networking Sockets/Utils APIs appear in metadata names. FACEIT AC message callbacks exist and stay out of scope.
 
-### Not claimed
+### Not claimed **[U]**
 
 - Complete opcode ↔ handler table
 - Wire format / serialization layout
@@ -257,9 +267,9 @@ Steam Networking Sockets/Utils APIs appear in metadata names. FACEIT AC message 
 
 ## Vehicles / loadout / squad
 
-- Vehicle post-damage `FUN_180faf380` is the rich sync path. The T1 vehicle bucket covers get-in/out and health-changed surfaces.
-- Loadout: `SwitchLoadout` / `ReloadLoadout` showed up earlier. The T1 loadout bucket is small (25 files) but complete in the local map.
-- Squad / team: Phase 4 maps catalog T1 `Spawn*` / `Squad*` / `Team*` surfaces. Authority cues stay `Server_` vs `Received_` naming.
+- Vehicle post-damage `FUN_180faf380` is the rich sync path **[O]**. The T1 vehicle bucket covers get-in/out and health-changed surfaces **[O]**.
+- Loadout: `SwitchLoadout` / `ReloadLoadout` showed up earlier **[O]**. The T1 loadout bucket is small (25 files) but complete in the local map **[O]**.
+- Squad / team: Phase 4 maps catalog T1 `Spawn*` / `Squad*` / `Team*` surfaces **[O]**. Authority cues stay `Server_` vs `Received_` naming **[I]**.
 
 ## Key addresses
 
@@ -284,17 +294,7 @@ ImageBase `0x180000000`. RVA = VA − ImageBase.
 | OnPlayerSpawnReceived | `0x18111d4e0` |
 | SendDenySpawn | `0x180ce6090` |
 
-## Evidence grades
-
-| Grade | Meaning |
-|-------|---------|
-| O | Observed directly in private decompile / metadata |
-| I | Inferred from structure / naming / call patterns |
-| U | Unknown / not established |
-
-Section prose marks confidence inline. Open questions are U.
-
-## Still unknown
+## Still unknown **[U]**
 
 - Exact combat orchestrator `switch` case semantics
 - Spawn deny code → string/enum mapping
