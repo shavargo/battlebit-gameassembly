@@ -1,0 +1,69 @@
+# --- Published tree is docs-only; keep research payloads local ---
+ghidra-decompiles/
+ghidra-project/
+il2cpp-dump/
+indexes/
+docs/
+queues/
+tools/
+ghidra-scripts/
+il2cppdumper/
+
+# --- Game binaries / install content ---
+GameAssembly.dll
+GameAssembly.dll.*
+global-metadata.dat
+**/global-metadata.dat
+*.exe
+UnityPlayer.dll
+baselib.dll
+GameAssembly.so
+*.assets
+*.asset
+*.resource
+*.resS
+*.bundle
+*.unity3d
+*.pak
+*.map
+StreamingAssets/
+Managed/
+il2cpp_data/
+Level*/
+SharedAssets*
+
+# --- Local automation ---
+run-*.ps1
+create-persistent-ghidra-project.ps1
+PLAN.md
+_*.ps1
+_*.js
+
+# --- Runtime logs / local process output ---
+*.log
+*_stdout.txt
+*_stderr.txt
+FULL_DECOMPILE_STATUS.log
+autonomous-*.txt
+canvas-refresh-*.txt
+decompile-*.txt
+phase4-*.txt
+progress-server-*.txt
+queue-*.txt
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- Node ---
+node_modules/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example

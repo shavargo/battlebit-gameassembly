@@ -1,0 +1,5 @@
+# Treat decompiled C as generated (hide from language stats)
+ghidra-decompiles/** linguist-generated=true
+il2cpp-dump/** linguist-generated=true
+docs/notes/** linguist-generated=true
+*.c linguist-generated=true
